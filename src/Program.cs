@@ -74,14 +74,16 @@ namespace Nod
                           from e in inspectLoadSet
                           where !string.IsNullOrEmpty(e)
                           select e),
-                      SysConsole.In.ReadLines());
+                      SysConsole.In.ReadLines(),
+                      _verbose);
         }
 
         static async Task
             Run(FileInfo mainScriptFile, string[] argv,
                 bool inspect, bool pauseDebuggerOnStart,
                 IImmutableSet<string> inspectLoadSet,
-                IEnumerator<string> commands)
+                IEnumerator<string> commands,
+                bool verbose)
         {
             var rootDir = mainScriptFile.Directory;
             Debug.Assert(rootDir != null);
@@ -123,20 +125,20 @@ namespace Nod
 
                     TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
-                    void OnInfo(object sender, string message) =>
-                        host.Console.Info(FormatMessage(sender, message));
+                    var infoLog = !verbose ? null : new LogEventHandler((sender, message) =>
+                        host.Console.Info(FormatMessage(sender, message)));
 
-                    void OnWarning(object sender, Exception e, string message) =>
-                        host.Console.Warn(FormatMessage(sender, e == null ? message : string.IsNullOrEmpty(message) ? e.ToString() : message + Environment.NewLine + e));
+                    var warnLog = !verbose ? null : new ErrorLogEventHandler((sender, e, message) =>
+                        host.Console.Warn(FormatMessage(sender, e == null ? message : string.IsNullOrEmpty(message) ? e.ToString() : message + Environment.NewLine + e)));
 
-                    void OnError(object sender, Exception e, string message) =>
-                        host.Console.Error(FormatMessage(sender, string.IsNullOrEmpty(message) ? e.ToString() : message + Environment.NewLine + e));
+                    var errorLog = !verbose ? null : new ErrorLogEventHandler((sender, e, message) =>
+                        host.Console.Error(FormatMessage(sender, string.IsNullOrEmpty(message) ? e.ToString() : message + Environment.NewLine + e)));
 
                     foreach (var service in new ILogSource[] { host, host.Timer, host.Xhr })
                     {
-                        service.InfoLog  = OnInfo;
-                        service.WarnLog  = OnWarning;
-                        service.ErrorLog = OnError;
+                        service.InfoLog  = infoLog;
+                        service.WarnLog  = warnLog;
+                        service.ErrorLog = errorLog;
                     }
 
                     var tasks = new List<NamedTask>();
@@ -147,12 +149,15 @@ namespace Nod
                     host.TaskStarting += (_, task) => AddTask(task);
                     host.TaskFinishing += (_, task) => RemoveTask(task);
 
-                    host.ServiceCreated += (_, service) =>
+                    if (verbose)
                     {
-                        service.InfoLog  = OnInfo;
-                        service.WarnLog  = OnWarning;
-                        service.ErrorLog = OnError;
-                    };
+                        host.ServiceCreated += (_, service) =>
+                        {
+                            service.InfoLog  = infoLog;
+                            service.WarnLog  = warnLog;
+                            service.ErrorLog = errorLog;
+                        };
+                    }
 
                     engine.EmbedHostObject("host", host);
                     var initScript = GetManifestResourceStream("init.js", typeof(Program)).ReadAsText();
@@ -187,7 +192,7 @@ namespace Nod
                                     thisTask.FlagCanceled(e.CancellationToken);
                                     break;
                                 default:
-                                    OnError(nameof(Program), error, null);
+                                    errorLog?.Invoke(nameof(Program), error, null);
                                     thisTask.FlagError(error);
                                     break;
                             }
@@ -205,7 +210,7 @@ namespace Nod
                         const string ondata = "ondata";
                         Schedule(ondata, delegate
                         {
-                            OnInfo(nameof(Program), "STDIN: " + command);
+                            infoLog?.Invoke(nameof(Program), "STDIN: " + command);
                             engine.CallFunction(ondata, command);
                         });
                     }
@@ -219,7 +224,7 @@ namespace Nod
                     host.Timer.CancelAll();
                     host.Xhr.AbortAll();
 
-                    OnInfo(typeof(Program), "Shutting down...");
+                    infoLog?.Invoke(typeof(Program), "Shutting down...");
 
                     ImmutableArray<Task> tasksSnapshot;
 
@@ -227,11 +232,11 @@ namespace Nod
                         tasksSnapshot = ImmutableArray.CreateRange(from t in tasks select t.Task);
 
                     if (await tasksSnapshot.WhenAll(TimeSpan.FromSeconds(30)))
-                        OnWarning(typeof(Program), null, "Timed-out waiting for all tasks to end for a graceful shutdown!");
+                        warnLog?.Invoke(typeof(Program), null, "Timed-out waiting for all tasks to end for a graceful shutdown!");
                     else
                         Debug.Assert(tasks.Count == 0);
 
-                    OnInfo(typeof(Program), "Shutdown completed.");
+                    infoLog?.Invoke(typeof(Program), "Shutdown completed.");
 
                     TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
                 }
