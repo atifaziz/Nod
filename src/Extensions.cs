@@ -26,9 +26,6 @@ namespace Nod
         public static string Bracket(this string s, string left, string right) =>
             left + s + right;
 
-        public static T If<T>(this T obj, bool condition) where T : class =>
-            condition ? obj : null;
-
         public static IEnumerator<string> ReadLines(this TextReader reader)
         {
             if (reader == null) throw new ArgumentNullException(nameof(reader));
