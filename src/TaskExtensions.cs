@@ -18,36 +18,18 @@ namespace Nod
 {
     using System;
     using System.Collections.Generic;
-    using System.Threading;
     using System.Threading.Tasks;
 
     static class TaskExtensions
     {
-        public static async Task WhenAll(this IEnumerable<Task> tasks, TimeSpan timeout)
-        {
-            using (var cancellationTokenSource = new CancellationTokenSource(timeout))
-                await tasks.WhenAll(cancellationTokenSource.Token);
-        }
-
-        public static async Task WhenAll(this IEnumerable<Task> tasks, CancellationToken cancellationToken)
+        public static async Task<bool> WhenAll(this IEnumerable<Task> tasks, TimeSpan timeout)
         {
             if (tasks == null) throw new ArgumentNullException(nameof(tasks));
-
-            if (!cancellationToken.CanBeCanceled)
-            {
-                await Task.WhenAll(tasks);
-            }
-            else
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var taskCompletionSource = new TaskCompletionSource<object>();
-                using (cancellationToken.Register(() => taskCompletionSource.TrySetResult(null)))
-                {
-                    var task = await Task.WhenAny(taskCompletionSource.Task, Task.WhenAll(tasks));
-                    if (task == taskCompletionSource.Task)
-                        throw new OperationCanceledException(cancellationToken);
-                }
-            }
+            if (timeout == TimeSpan.Zero)
+                return false;
+            var timeoutTask = Task.Delay(timeout);
+            return timeoutTask != await Task.WhenAny(timeoutTask, Task.WhenAll(tasks))
+                                            .ConfigureAwait(false);
         }
     }
 }
