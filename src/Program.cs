@@ -220,13 +220,18 @@ namespace Nod
                     host.Xhr.AbortAll();
 
                     OnInfo(typeof(Program), "Shutting down...");
+
                     ImmutableArray<Task> tasksSnapshot;
+
                     lock (tasks)
                         tasksSnapshot = ImmutableArray.CreateRange(from t in tasks select t.Task);
-                    await tasksSnapshot.WhenAll(TimeSpan.FromSeconds(30));
-                    OnInfo(typeof(Program), "Shutdown completed.");
 
-                    Debug.Assert(tasks.Count == 0);
+                    if (await tasksSnapshot.WhenAll(TimeSpan.FromSeconds(30)))
+                        OnWarning(typeof(Program), null, "Timed-out waiting for all tasks to end for a graceful shutdown!");
+                    else
+                        Debug.Assert(tasks.Count == 0);
+
+                    OnInfo(typeof(Program), "Shutdown completed.");
 
                     TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
                 }
