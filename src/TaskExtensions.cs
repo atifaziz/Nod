@@ -20,7 +20,6 @@ namespace Nod
     using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
-    using Unit = System.ValueTuple;
 
     static class TaskExtensions
     {
@@ -50,39 +49,5 @@ namespace Nod
                 }
             }
         }
-
-        public static void Do(this Task task,
-            Action onResult, Action<Exception> onErrorOrCancellation)
-            => task.Do(onResult, onErrorOrCancellation,
-                       () => onErrorOrCancellation(null));
-
-        public static void Do(this Task task,
-            Action onResult, Action<Exception> onError, Action onCancellation)
-            => task.Match(() => { onResult(); return new Unit(); },
-                          e  => { onError(e); return new Unit(); },
-                          () => { onCancellation(); return new Unit(); });
-
-        public static void Do<T>(this Task<T> task,
-            Action<T> onResult, Action<Exception> onErrorOrCancellation)
-            => task.Do(onResult, onErrorOrCancellation,
-                       () => onErrorOrCancellation(null));
-
-        public static void Do<T>(this Task<T> task,
-            Action<T> onResult, Action<Exception> onError, Action onCancellation)
-            => task.Match(r  => { onResult(r); return new Unit(); },
-                          e  => { onError(e); return new Unit(); },
-                          () => { onCancellation(); return new Unit(); });
-
-        public static TResult Match<T, TResult>(this Task<T> task,
-            Func<T, TResult> onResult, Func<Exception, TResult> onError, Func<TResult> onCancellation)
-            => task.IsFaulted  ? onError(task.Exception)
-             : task.IsCanceled ? onCancellation()
-             : onResult(task.Result);
-
-        public static TResult Match<TResult>(this Task task,
-            Func<TResult> onResult, Func<Exception, TResult> onError, Func<TResult> onCancellation)
-            => task.IsFaulted  ? onError(task.Exception)
-             : task.IsCanceled ? onCancellation()
-             : onResult();
     }
 }
