@@ -264,34 +264,9 @@ namespace Nod
             };
         }
 
-        interface IStreamSource
-        {
-            Stream Open();
-        }
-
-        sealed class StreamSource : IStreamSource
-        {
-            readonly Func<Stream> _opener;
-
-            public StreamSource(Func<Stream> opener) =>
-                _opener = opener ?? throw new ArgumentNullException(nameof(opener));
-
-            public Stream Open() => _opener();
-        }
-
-        static string ReadAsText(this IStreamSource source, Encoding encoding = null)
-        {
-            using (var stream = source.Open())
-            using (var reader = encoding == null ? new StreamReader(stream)
-                                                 : new StreamReader(stream, encoding))
-            {
-                return reader.ReadToEnd();
-            }
-        }
-
         static IStreamSource GetManifestResourceStream(string name, Type type = null) =>
-            new StreamSource(() => type != null ? type.Assembly.GetManifestResourceStream(type, name)
-                               : Assembly.GetCallingAssembly().GetManifestResourceStream(name));
+            StreamSource.Create(() => type != null ? type.Assembly.GetManifestResourceStream(type, name)
+                                    : Assembly.GetCallingAssembly().GetManifestResourceStream(name));
 
         static async Task<int> Main(string[] args)
         {
