@@ -27,8 +27,8 @@ namespace Nod
     using System.Threading;
     using System.Threading.Tasks;
     using JavaScriptEngineSwitcher.V8;
-    using NDesk.Options;
     using SysConsole = System.Console;
+    using OptionSetArgumentParser = System.Func<System.Func<string, NDesk.Options.OptionContext, bool>, string, NDesk.Options.OptionContext, bool>;
 
     static class Program
     {
@@ -40,7 +40,7 @@ namespace Nod
             var pauseDebuggerOnStart = false;
             var inspectLoadSet = new HashSet<string>(StringComparer.Ordinal);
 
-            var options = new OptionSet
+            var options = new OptionSet(CreateStrictOptionSetArgumentParser())
             {
                 { "v|verbose", "enable verbose output",
                    _ => _verbose = true },
@@ -241,6 +241,27 @@ namespace Nod
                     TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
                 }
             }
+        }
+
+        static OptionSetArgumentParser CreateStrictOptionSetArgumentParser()
+        {
+            var hasTailStarted = false;
+            return (impl, arg, context) =>
+            {
+                if (hasTailStarted) // once a tail, always a tail
+                    return false;
+
+                var isOption = impl(arg, context);
+                if (!isOption && !hasTailStarted)
+                {
+                    if (arg.Length > 1 && arg[0] == '-')
+                        throw new Exception("Invalid argument: " + arg);
+
+                    hasTailStarted = true;
+                }
+
+                return isOption;
+            };
         }
 
         interface IStreamSource
