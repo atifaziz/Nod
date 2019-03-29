@@ -232,9 +232,9 @@ namespace Nod
                         tasksSnapshot = ImmutableArray.CreateRange(from t in tasks select t.Task);
 
                     if (await tasksSnapshot.WhenAll(TimeSpan.FromSeconds(30)))
-                        warnLog?.Invoke(typeof(Program), null, "Timed-out waiting for all tasks to end for a graceful shutdown!");
-                    else
                         Debug.Assert(tasks.Count == 0);
+                    else
+                        warnLog?.Invoke(typeof(Program), null, "Timed-out waiting for all tasks to end for a graceful shutdown!");
 
                     infoLog?.Invoke(typeof(Program), "Shutdown completed.");
 
