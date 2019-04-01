@@ -20,12 +20,14 @@ namespace Nod
     using System.Collections.Generic;
     using System.Collections.Immutable;
     using System.Diagnostics;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Reflection;
     using System.Threading;
     using System.Threading.Tasks;
     using JavaScriptEngineSwitcher.V8;
+    using Mannex.Diagnostics;
     using SysConsole = System.Console;
     using OptionSetArgumentParser = System.Func<System.Func<string, NDesk.Options.OptionContext, bool>, string, NDesk.Options.OptionContext, bool>;
 
@@ -38,6 +40,7 @@ namespace Nod
             var inspect = false;
             var pauseDebuggerOnStart = false;
             var inspectLoadSet = new HashSet<string>(StringComparer.Ordinal);
+            var parentProcessId = (int?)null;
 
             var options = new OptionSet(CreateStrictOptionSetArgumentParser())
             {
@@ -55,6 +58,9 @@ namespace Nod
 
                 { "inspect-brk-load=", "activate inspector and break on load of script",
                   v => { if (Environment.UserInteractive) inspectLoadSet.Add(v); } },
+
+                { "parent-pid=", "link lifetime with that of of process with {ID}",
+                  v => parentProcessId = int.Parse(v, NumberStyles.None, CultureInfo.InvariantCulture) },
             };
 
             var tail = options.Parse(args);
@@ -67,21 +73,37 @@ namespace Nod
             if (!scriptPathFile.Exists)
                 throw new FileNotFoundException("File not found: " + scriptPathFile);
 
-            await Run(scriptPathFile, tail.Skip(1).ToArray(),
-                      inspect, pauseDebuggerOnStart,
-                      ImmutableHashSet.CreateRange(
-                          from e in inspectLoadSet
-                          where !string.IsNullOrEmpty(e)
-                          select e),
-                      SysConsole.In.ReadLines(),
-                      _verbose);
+            using (var parentProcess = parentProcessId is int pid
+                                     ? Process.GetProcessById(pid)
+                                     : null)
+            {
+                await Run(scriptPathFile, tail.Skip(1).ToArray(),
+                          inspect, pauseDebuggerOnStart,
+                          ImmutableHashSet.CreateRange(
+                              from e in inspectLoadSet
+                              where !string.IsNullOrEmpty(e)
+                              select e),
+                          ReadLineFromStdInAsync,
+                          parentProcess,
+                          _verbose);
+
+                // NOTE! Read operations on the standard input stream execute
+                // synchronously. That is, they block until the specified read
+                // operation has completed. This is true even if an asynchronous
+                // method, such as ReadLineAsync, is called on the TextReader
+                // object returned by the In property.
+
+                Task<string> ReadLineFromStdInAsync(CancellationToken cancellationToken) =>
+                    Task.Run(() => SysConsole.In.ReadLineAsync(), cancellationToken);
+            }
         }
 
         static async Task
             Run(FileInfo mainScriptFile, string[] argv,
                 bool inspect, bool pauseDebuggerOnStart,
                 IImmutableSet<string> inspectLoadSet,
-                IEnumerator<string> commands,
+                Func<CancellationToken, Task<string>> f,
+                Process parentProcess,
                 bool verbose)
         {
             var rootDir = mainScriptFile.Directory;
@@ -200,10 +222,29 @@ namespace Nod
                         task.Start(scheduler);
                     }
 
-                    while (commands.MoveNext())
+                    var parentProcessTask = parentProcess.AsTask(dispose: true, p => p.ExitCode,
+                                                                                _ => null,
+                                                                                exit => exit);
+
+                    while (true)
                     {
-                        var command = commands.Current?.Trim();
-                        if (string.IsNullOrEmpty(command))
+                        var readCommandTask = f(CancellationToken.None);
+                        if (parentProcessTask != null)
+                        {
+                            if (parentProcessTask == await Task.WhenAny(readCommandTask, parentProcessTask))
+                                break;
+                        }
+                        else
+                        {
+                            await readCommandTask;
+                        }
+
+                        var command = (await readCommandTask)?.Trim();
+
+                        if (command == null)
+                            break;
+
+                        if (command.Length == 0)
                             continue;
 
                         const string ondata = "ondata";
